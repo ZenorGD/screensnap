@@ -1,8 +1,6 @@
 package com.tommyapps.recorder
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -115,8 +113,9 @@ fun hasMic(c: Context) =
     ContextCompat.checkSelfPermission(c, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 fun hasNotif(c: Context) = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(c, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-fun hasSecure(c: Context) =
-    ContextCompat.checkSelfPermission(c, "android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED
+
+fun hasWriteSettings(c: Context) =
+    Settings.System.canWrite(c)
 
 /** Turns the floating menu on/off. Takes effect straight away if a recording is running. */
 fun setFloatingMenu(ctx: Context, on: Boolean) {
@@ -131,7 +130,6 @@ fun setFloatingMenu(ctx: Context, on: Boolean) {
     }
 }
 
-private const val ADB_COMMAND = "adb shell pm grant com.tommyapps.recorder android.permission.WRITE_SECURE_SETTINGS"
 
 /* ---------- Navigation with animations + predictive back ---------- */
 @Composable
@@ -444,9 +442,25 @@ fun RecordTab(state: Int, onToggle: () -> Unit, onSettings: () -> Unit) {
 fun SettingsScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    var secureOk by remember { mutableStateOf(hasSecure(ctx)) }
-    var showAdb by remember { mutableStateOf(false) }
-    LifecycleResumeEffect(Unit) { secureOk = hasSecure(ctx); onPauseOrDispose { } }
+    var writeSettingsOk by remember {
+        mutableStateOf(hasWriteSettings(ctx))
+    }
+
+    var enableTouchesAfterPermission by remember {
+        mutableStateOf(false)
+    }
+
+    LifecycleResumeEffect(Unit) {
+        writeSettingsOk = hasWriteSettings(ctx)
+
+        if (writeSettingsOk && enableTouchesAfterPermission) {
+            Prefs.showTouches = true
+        }
+
+        enableTouchesAfterPermission = false
+
+        onPauseOrDispose { }
+    }
 
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) saveFolder(ctx, uri)
@@ -457,23 +471,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         if (Build.VERSION.SDK_INT >= 29) { add("Device" to 2); add("Both" to 3) }
     }
 
-    if (showAdb) {
-        AlertDialog(
-            onDismissRequest = { showAdb = false },
-            title = { Text("One-time setup needed") },
-            text = {
-                Text("Android only lets the system draw touch dots, and apps can't see touches in other apps. " +
-                        "Turn on USB debugging, connect to a computer and run:\n\n$ADB_COMMAND")
-            },
-            confirmButton = {
-                TextButton({
-                    ctx.getSystemService(ClipboardManager::class.java)
-                        .setPrimaryClip(ClipData.newPlainText("adb", ADB_COMMAND))
-                }) { Text("Copy command") }
-            },
-            dismissButton = { TextButton({ showAdb = false }) { Text("Close") } }
-        )
-    }
+
 
     Scaffold(
         Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -520,9 +518,26 @@ fun SettingsScreen(onBack: () -> Unit) {
             Section("Recording") {
                 SwitchRow(
                     "Show touches",
-                    if (secureOk) "Highlight taps in the recording" else "Needs a one-time setup, tap to see how",
-                    Prefs.showTouches && secureOk
-                ) { on -> if (on && !secureOk) showAdb = true else Prefs.showTouches = on }
+                    if (writeSettingsOk) {
+                        "Highlight taps in the recording"
+                    } else {
+                        "Allow system settings access to highlight taps"
+                    },
+                    Prefs.showTouches && writeSettingsOk
+                ) { on ->
+                    if (on && !writeSettingsOk) {
+                        enableTouchesAfterPermission = true
+
+                        ctx.startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                Uri.parse("package:${ctx.packageName}")
+                            )
+                        )
+                    } else {
+                        Prefs.showTouches = on
+                    }
+                }
             }
             Section("Floating controls") {
                 SwitchRow("Floating menu", "Pause, stop, pen and erase while recording", Prefs.overlay) { on ->
