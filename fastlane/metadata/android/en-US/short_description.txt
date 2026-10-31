@@ -1,0 +1,1 @@
+A simple Android screen recorder with a Material 3 interface

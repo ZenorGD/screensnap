@@ -1,0 +1,5 @@
+ScreenSnap is a simple Android screen recorder with a modern Material 3 interface.
+
+Designed to provide a straightforward way to record your Android screen, ScreenSnap supports devices running Android 7.0 and newer.
+
+Made by Tommy Apps.
